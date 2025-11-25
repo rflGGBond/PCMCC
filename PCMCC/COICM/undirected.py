@@ -237,7 +237,7 @@ def fitness_C_7(seed_7, G_7, SN_7, comAndFS_7, hop_7):
     for (u, t) in apN_fc:
         if t == hop_7 and apN_fc[u, hop_7] > 0:
             neg_activated_nodes.append(u)
-
+#
     num_neg_activated = len(neg_activated_nodes)
     print(f"[Final Negative Activation] 最终被负向激活的节点数 = {num_neg_activated}")
     # =================================
