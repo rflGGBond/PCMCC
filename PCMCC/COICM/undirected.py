@@ -18,7 +18,7 @@ class Logger(object):
         output_dir = "../../results/undirected"  # folder 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        log_name = "COICM_WS3000_log.txt"
+        log_name = "facebook_test_log.txt"
         filename = os.path.join(output_dir, log_name)
 
         self.terminal = stream
@@ -231,6 +231,17 @@ def fitness_C_7(seed_7, G_7, SN_7, comAndFS_7, hop_7):
                 apN_fc[v, tau_f] = apN_fc[v, h] + pN_fc[v, h + 1]
     for u in comAndFS_7:
         effect_fc += apN_fc[u, hop_7]
+    
+    # === 统计最终被负向激活的节点 ===
+    neg_activated_nodes = []
+    for (u, t) in apN_fc:
+        if t == hop_7 and apN_fc[u, hop_7] > 0:
+            neg_activated_nodes.append(u)
+
+    num_neg_activated = len(neg_activated_nodes)
+    print(f"[Final Negative Activation] 最终被负向激活的节点数 = {num_neg_activated}")
+    # =================================
+
     return effect_fc
 
 def outer_8(effect_8, i_8, j_8, Ni_8):
@@ -1082,9 +1093,60 @@ def mergeCommunity_12(merge_12, communityList_12, community_k_12, islands_12, is
     return new_islands, new_islandsEffect, new_communityList, new_community_k, \
            s_t_l_12, new_comGenAcc_12, new_comBen_12, comAndSea_12, comAndFS_12, comOrSN_12, comGs_12, gamaCom_12, new_comRes
 
+# def count_negative_activated_nodes(G, SN, hop):
+#     """
+#     在计算结束后统计被负向激活的节点数量
+#     逻辑：重新跑 DPADV（负向传播）并统计 apN(u, hop) > 0 的节点
+#     """
+#     # 1. 需要构建 fitness space（即 FS）
+#     #    FS = Nout(SN, h) \ SN
+#     from collections import deque
+    
+#     # ---- 计算 Nout(SN, h) ----
+#     FS = set()
+#     queue = deque()
+#     for s in SN:
+#         queue.append((s, 0))
+
+#     visited = set(SN)
+
+#     while queue:
+#         v, d = queue.popleft()
+#         if d == hop:
+#             continue
+
+#         for w in G.neighbors(v):
+#             if w not in visited:
+#                 visited.add(w)
+#                 FS.add(w)
+#                 queue.append((w, d + 1))
+
+#     # FS 去掉 SN（保险起见）
+#     FS = FS - set(SN)
+
+#     # ---------------------
+#     # 2. 重新计算负向传播概率（DPADV）
+#     # ---------------------
+#     N_prob = negativeProbability_2(G, SN, FS, hop, all_FP_2=[])
+    
+#     # ---------------------
+#     # 3. 统计 apN(u, hop) > 0 的节点
+#     # ---------------------
+#     neg_activated = []
+#     for u in FS:
+#         # apN 需要累加 t=1..hop
+#         total_an = 0
+#         for t in range(1, hop + 1):
+#             total_an += N_prob.get((u, t), 0)
+        
+#         if total_an > 0:
+#             neg_activated.append(u)
+
+#     return len(neg_activated), neg_activated
+
 
 if __name__ == "__main__":
-    ys.stdout = Logger(sys.stdout)  # record log
+    sys.stdout = Logger(sys.stdout)  # record log
 
     SN_dic = {}
     SN_dic["facebook"] = [107, 1684, 1912, 3437, 0, 2543, 2347, 1888, 1800, 1663, 2266, 1352, 483, 348, 1730,
@@ -1112,7 +1174,7 @@ if __name__ == "__main__":
                          1167, 1176, 1183, 1189, 1192, 1197, 1198, 1209, 1241, 1253, 1258, 1275, 1277, 1326, 1336, 1376, 1392, 1427, 1441, 1452,
                            1464, 1465, 1470, 1482, 1489, 1502, 1519]
 
-    graphs = ["WS3000"]
+    graphs = ["facebook"]
 
     for file_name in graphs:
         G = nx.Graph()
@@ -1539,4 +1601,7 @@ if __name__ == "__main__":
 
                 print("bestS:", bestS)
                 print("Optimal fitness value:", bestE)
+
+                # cnt, nodes = count_negative_activated_nodes(G, SN, hop)
+                # print("negative activated nodes: ", cnt)
 
