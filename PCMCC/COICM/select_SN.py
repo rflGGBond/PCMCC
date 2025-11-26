@@ -1,27 +1,32 @@
-import numpy as np
+import networkx as nx
 
-# 1. 设置上限（需 >= 50）
-upper_limit = 75879
+def select_SN(G_name, SN_size):
+    file_path = f"../../graph/{G_name}.txt"
 
-# 2. 设定正态分布参数
-mean = upper_limit / 2          # 均值在中间
-std_dev = upper_limit / 6       # 标准差（控制分布宽度，可调）
+    G = nx.Graph()
 
-# 3. 不断采样直到获得50个不同整数
-selected = set()
-while len(selected) < 50:
-    # 生成一批服从正态分布的随机数
-    samples = np.random.normal(loc=mean, scale=std_dev, size=100)
-    # 取整并过滤范围外的数
-    valid_samples = [int(round(x)) for x in samples if 0 <= x <= upper_limit]
-    selected.update(valid_samples)
-    # 防止过多迭代
-    if len(selected) > 1000:
-        break
+    with open(file_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 3:
+                continue
+            u, v = int(parts[0]), int(parts[1])
+            w = float(parts[2])
+            G.add_edge(u, v, weight=w)
 
-# 只保留前50个
-numbers = sorted(list(selected))[:50]
+    # print("图加载完成")
+    # print("节点数:", G.number_of_nodes())
+    # print("边数:", G.number_of_edges())
 
-print("✅ 选取的50个数字（符合近似正态分布）:")
-print(numbers)
+    # ===============================
+    # 选取度数最高的 50 个节点作为 SN
+    # ===============================
+
+    # 按 degree 从大到小排序
+    degree_list = sorted(G.degree(), key=lambda x: x[1], reverse=True)
+
+    # 取前 50 个节点
+    SN = [node for node, deg in degree_list[:SN_size]]
+    
+    return SN
 
