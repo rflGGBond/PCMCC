@@ -1,0 +1,208 @@
+import copy
+import networkx as nx
+from collections import defaultdict
+import heapq
+from .evaluator import DPADVEvaluator
+
+def merge_communities(merge_flags, community_list, community_k, population, effect,
+                      com_res, Ni, G, subG_list, SN, fitness_space, hop, s_t_l, curT,
+                      com_gen_acc, com_ben, P_score, gama, search_space):
+    """
+    Refactored from mergeCommunity_12.
+    Executes the community merging process based on merge_flags.
+    """
+    
+    # Logic to determine merge pairs (transitive closure of merge flags)
+    if len(community_list) > 2:
+        lengths = [len(sublist) for sublist in community_list]
+        # Sort by size descending
+        lengths_index = [i[0] for i in sorted(enumerate(lengths), key=lambda x: x[1], reverse=True)]
+        max_connection_index = [-1 for _ in range(len(community_list))]
+
+        merge_score = defaultdict(lambda: -1)
+
+        for i in range(len(community_list)):
+            if merge_flags[i] == -1:
+                max_connection_i = 0
+                max_connection_index_i = 0
+                for j in range(len(community_list)):
+                    if i != j:
+                        if merge_score[i, j] == -1:
+                            merge_score[i, j] = 0
+                            merge_score[j, i] = 0
+                            
+                            # Calculate connection strength (boundary edges * weight)
+                            for edge in list(nx.edge_boundary(G, community_list[i], community_list[j])):
+                                one_score = 0
+                                for v in subG_list[j].neighbors(edge[1]):
+                                    one_score += subG_list[j][edge[1]][v]['weight']
+                                merge_score[i, j] += (one_score * G[edge[0]][edge[1]]['weight'])
+                                merge_score[j, i] += (one_score * G[edge[0]][edge[1]]['weight'])
+
+                                one_score = 0
+                                for v in subG_list[i].neighbors(edge[0]):
+                                    one_score += subG_list[i][edge[0]][v]['weight']
+                                merge_score[i, j] += (one_score * G[edge[0]][edge[1]]['weight'])
+                                merge_score[j, i] += (one_score * G[edge[0]][edge[1]]['weight'])
+
+                        if max_connection_i <= merge_score[i, j]:
+                            max_connection_i = merge_score[i, j]
+                            max_connection_index_i = j
+
+                max_connection_index[i] = max_connection_index_i
+
+        for i in lengths_index:
+            if merge_flags[i] == -1:
+                if (merge_flags[max_connection_index[i]] == -2) or (merge_flags[max_connection_index[i]] == -1):
+                    merge_flags[i] = i
+                    merge_flags[max_connection_index[i]] = i
+                else:
+                    merge_flags[i] = merge_flags[max_connection_index[i]]
+
+    elif len(community_list) == 2:
+        if merge_flags[0] == -1 and merge_flags[1] == -2:
+            merge_flags[0] = 0
+            merge_flags[1] = 0
+        elif merge_flags[0] == -2 and merge_flags[1] == -1:
+            merge_flags[0] = 1
+            merge_flags[1] = 1
+        elif merge_flags[0] == -1 and merge_flags[1] == -1:
+            merge_flags[0] = 0
+            merge_flags[1] = 0
+
+    # Group communities to be merged
+    my_dict = {}
+    for i, value in enumerate(merge_flags):
+        if value >= 0:
+            if value not in my_dict:
+                my_dict[value] = [i]
+            else:
+                my_dict[value].append(i)
+
+    sorted_dict = sorted(my_dict.items(), key=lambda x: len(x[1]), reverse=True)
+    to_be_merged = [x[1] for x in sorted_dict if len(x[1]) > 1]
+
+    for i in range(len(community_list)):
+        rs = True
+        for row in to_be_merged:
+            if i in row:
+                rs = False
+        if rs:
+            to_be_merged.append([i])
+
+    # Re-organize data structures
+    new_com_res = []
+    for i in range(len(to_be_merged)):
+        new_com_res.append(0)
+        for j in to_be_merged[i]:
+            new_com_res[i] += com_res[j]
+
+    new_community_k = []
+    new_community_list = []
+    
+    # Initialize new islands (population)
+    # Note: Structure is [Community][Subpop][Individual]
+    # This logic assumes 'population' is a list of lists of lists
+    
+    new_islands = [[[] for j in range(new_com_res[i])] for i in range(len(to_be_merged))]
+    new_islands_effect = [[[] for j in range(new_com_res[i])] for i in range(len(to_be_merged))]
+
+    for i in range(len(to_be_merged)):
+        new_community_k.append(0)
+        new_community_list.append([])
+
+        for j in to_be_merged[i]:
+            new_community_k[i] += community_k[j]
+            new_community_list[i] += community_list[j]
+
+    # Recalculate helper sets for new communities
+    com_and_sea = []
+    com_and_fs = []
+    com_or_sn = []
+    com_gs = []
+    gama_com = []
+    
+    for i in range(len(new_community_list)):
+        com_and_sea.append(list(set(search_space).intersection(set(new_community_list[i]))))
+        com_and_fs.append(list(set(new_community_list[i]).intersection(set(fitness_space))))
+        com_or_sn.append(list(set(new_community_list[i] + SN)))
+        
+        tempsubGi = G.subgraph(com_or_sn[i])
+        subGi = nx.Graph(tempsubGi.edges(data=True))
+        subGi.add_nodes_from(com_or_sn[i])
+        com_gs.append(subGi.copy())
+        
+        gama_com.append(
+            heapq.nlargest(min(int(round(gama * new_community_k[i])), len(com_and_sea[i])), com_and_sea[i],
+                           key=lambda x: P_score[x]))
+
+    # Merge populations
+    for i in range(len(to_be_merged)):
+        temp_islands_i = [[[] for N in range(Ni)] for J in range(new_com_res[i])]
+        for J in range(new_com_res[i]):
+            for N in range(Ni):
+                for j in to_be_merged[i]:
+                    # Distribute old individuals to new structure
+                    # This logic attempts to merge populations from multiple source communities
+                    # into the new larger community's subpopulations
+                    # Original logic is complex here, keeping it as is:
+                    # It seems to flatten old populations and redistribute
+                    temp_islands_i[J][N] += population[j][J % com_res[j]][N]
+
+        for J in range(new_com_res[i]):
+            for N in range(Ni):
+                new_islands[i][J].append(temp_islands_i[J][N])
+
+    # Recalculate effects
+    for i in range(len(to_be_merged)):
+        if len(to_be_merged[i]) == 1:
+            for J in range(new_com_res[i]):
+                for N in range(Ni):
+                    new_islands_effect[i][J].append(effect[to_be_merged[i][0]][J][N])
+        else:
+            for J in range(new_com_res[i]):
+                for N in range(Ni):
+                    new_islands_effect[i][J].append(
+                        DPADVEvaluator.calculate_fitness(new_islands[i][J][N], com_gs[i], SN,
+                                    com_and_fs[i], hop))
+
+    # Calculate min effects for history
+    minE = [0 for i in range(len(to_be_merged))]
+    for i in range(len(to_be_merged)):
+        if new_islands_effect[i] and new_islands_effect[i][0]:
+             minE_i = new_islands_effect[i][0][0]
+             for j in range(new_com_res[i]):
+                 if min(new_islands_effect[i][j]) < minE_i:
+                     minE_i = min(new_islands_effect[i][j])
+             minE[i] = minE_i
+
+    new_com_gen_acc = [-1 for i in range(len(to_be_merged))]
+    new_com_ben = [-1 for i in range(len(to_be_merged))]
+
+    # Update history records (s_t_l)
+    for i in range(len(to_be_merged)):
+        if len(to_be_merged[i]) == 1:
+            new_com_gen_acc[i] = com_gen_acc[to_be_merged[i][0]]
+            new_com_ben[i] = com_ben[to_be_merged[i][0]]
+            
+            # Map old history to new index
+            # Note: s_t_l uses (index, time, total_coms) as key. 
+            # This is tricky because total_coms changes.
+            # We assume the caller handles the re-keying or we follow original logic closely.
+            s_t_l[i, curT, len(to_be_merged)] = (minE[i], com_gen_acc[to_be_merged[i][0]])
+            # Copy benchmark record
+            s_t_l[i, new_com_ben[i], len(to_be_merged)] = copy.deepcopy(
+                s_t_l[to_be_merged[i][0], com_ben[to_be_merged[i][0]], len(community_list)])
+
+        else:
+            new_com_gen_acc[i] = com_gen_acc[to_be_merged[i][0]]
+            new_com_ben[i] = curT # Reset benchmark time for new merged community
+
+            for j in to_be_merged[i]:
+                if new_com_gen_acc[i] > com_gen_acc[j]:
+                    new_com_gen_acc[i] = com_gen_acc[j]
+
+            s_t_l[i, curT, len(to_be_merged)] = (minE[i], new_com_gen_acc[i])
+
+    return new_islands, new_islands_effect, new_community_list, new_community_k, \
+           s_t_l, new_com_gen_acc, new_com_ben, com_and_sea, com_and_fs, com_or_sn, com_gs, gama_com, new_com_res

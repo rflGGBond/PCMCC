@@ -30,3 +30,4 @@ def select_SN(G_name, SN_size):
     
     return SN
 
+# print(select_SN("RG3000", 50))

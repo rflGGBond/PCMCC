@@ -1,3 +1,4 @@
+from select_SN import select_SN
 import re
 import os, sys
 import time
@@ -15,10 +16,10 @@ from concurrent.futures import ProcessPoolExecutor
 class Logger(object):
 
     def __init__(self, stream=sys.stdout):
-        output_dir = "../../results/undirected"  # folder 
+        output_dir = "../../results/directed"  # folder 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        log_name = "COICM_WS3000_log.txt"
+        log_name = "COICM_email-Eu-core_log_20251127.txt"
         filename = os.path.join(output_dir, log_name)
 
         self.terminal = stream
@@ -190,6 +191,7 @@ def calEffect_6(i_6, j_6, Ni_6, populationij_6, comGsi_6, SN_6, comAndFSi_6, hop
     return effect_6
 
 def fitness_C_7(seed_7, G_7, SN_7, comAndFS_7, hop_7):
+    G_7 = G_7.to_directed()
     effect_fc = 0
     ZP_fc = []
     ZN_fc = []
@@ -244,6 +246,42 @@ def fitness_C_7(seed_7, G_7, SN_7, comAndFS_7, hop_7):
         effect_fc += apN_fc[u, hop_7]
     # 返回总影响值
     return effect_fc
+
+def simulate_propagation(G_sim, positive_seeds, negative_seeds, max_hop):
+    """模拟在给定正面种子和负面种子下的信息传播，返回最终负面激活的节点集合。"""
+    G_sim = G_sim.to_directed()
+    pos_activated = set(positive_seeds)        # 已被正面激活的节点集合
+    neg_activated = set(negative_seeds)        # 已被负面激活的节点集合
+    current_pos_frontier = set(positive_seeds) # 当前轮新激活的正面节点
+    current_neg_frontier = set(negative_seeds) # 当前轮新激活的负面节点
+    # 逐步扩散最多 max_hop 轮
+    for h in range(max_hop):
+        new_pos_frontier = set()
+        new_neg_frontier = set()
+        # 正面信息先传播
+        for u in current_pos_frontier:
+            for w in G_sim.successors(u):
+                if w not in pos_activated and w not in neg_activated:
+                    prob = G_sim[u][w]['weight']
+                    if random.random() < prob:         # 按概率激活
+                        pos_activated.add(w)
+                        new_pos_frontier.add(w)
+        # 负面信息后传播
+        for u in current_neg_frontier:
+            for w in G_sim.successors(u):
+                # 邻居尚未被任何信息激活，且本轮未被正面激活，负面才能尝试
+                if w not in pos_activated and w not in neg_activated and w not in new_pos_frontier:
+                    prob = G_sim[u][w]['weight']
+                    if random.random() < prob:
+                        neg_activated.add(w)
+                        new_neg_frontier.add(w)
+        # 更新当前激活前沿
+        current_pos_frontier = new_pos_frontier
+        current_neg_frontier = new_neg_frontier
+        # 若没有新激活节点，提前结束传播
+        if not current_pos_frontier and not current_neg_frontier:
+            break
+    return neg_activated
 
 def outer_8(effect_8, i_8, j_8, Ni_8):
     def done(res, *args, **kwargs):
@@ -1099,35 +1137,18 @@ if __name__ == "__main__":
     sys.stdout = Logger(sys.stdout)  # record log
 
     SN_dic = {}
-    SN_dic["facebook"] = [107, 1684, 1912, 3437, 0, 2543, 2347, 1888, 1800, 1663, 2266, 1352, 483, 348, 1730,
-                                   1985, 1941, 2233, 2142, 1431, 1199, 1584, 2206, 1768, 2611, 2410, 2229, 2218, 2047,
-                                   1589, 1086, 2078, 2123, 1993, 2464, 1746, 2560, 2507, 2240, 1827, 2244, 2309, 1983,
-                                   2602, 2340, 2131, 2088, 1126, 2590, 2369]
+    SN_dic["email-Eu-core"] = select_SN("email-Eu-core", 50)
     
-    SN_dic["HR"] = [4003, 5958, 9538, 11746, 0, 14813, 15570, 15859, 16511, 17490, 17610, 17782, 17961, 18759, 19019,
-                     19632, 19866, 20030, 20036, 20133, 2029, 20926, 21221, 21242, 21387, 21465, 22135, 22313, 22377, 22599,
-                       23376, 23523, 23621, 23763, 23871, 244, 24733, 24807, 24913, 25]
+    SN_dic["Enail-EuAll"] = select_SN("Email-EuAll", 50)
     
-    SN_dic["BA3000"] = [413, 443, 493, 540, 542, 837, 839, 859, 896, 920, 949, 978, 982, 1021, 1038, 1041, 1047, 1051, 1052,
-                         1072, 1075, 1079, 1089, 1102, 1105, 1106, 1109, 1115, 1121, 1144, 1155, 1164, 1169, 1172, 1174, 1205,
-                           1212, 1218, 1235, 1236, 1242, 1254, 1267, 1271, 1291, 1303, 1321, 1325, 1332, 1348]
+    SN_dic["p2p-Gnutella31"] = select_SN("p2p-Gnutella31", 50)
     
-    SN_dic["ER3000"] =[458, 606, 644, 670, 700, 787, 833, 844, 868, 928, 945, 954, 963, 973, 974, 1004, 1045, 1067, 1100, 1118, 
-                       1151, 1186, 1197, 1200, 1226, 1228, 1229, 1249, 1260, 1275, 1285, 1302, 1311, 1313, 1324, 1341, 1345, 1350,
-                         1355, 1380, 1401, 1414, 1421, 1426, 1466, 1491, 1494, 1500, 1506, 1513]
-    
-    SN_dic["RG3000"] = [158, 171, 203, 314, 410, 513, 692, 698, 723, 771, 812, 834, 866, 900, 911, 1013, 1032, 1035, 1041, 1047, 1073,
-                         1120, 1130, 1159, 1174, 1180, 1189, 1209, 1239, 1261, 1279, 1285, 1293, 1296, 1328, 1333, 1345, 1354, 1357, 1385,
-                           1386, 1392, 1393, 1407, 1423, 1427, 1450, 1455, 1463, 1467]
-    
-    SN_dic["WS3000"] = [47, 543, 587, 685, 686, 712, 713, 714, 729, 741, 757, 796, 835, 885, 974, 983, 993, 1028, 1029, 1039, 1057, 1110, 1160,
-                         1167, 1176, 1183, 1189, 1192, 1197, 1198, 1209, 1241, 1253, 1258, 1275, 1277, 1326, 1336, 1376, 1392, 1427, 1441, 1452,
-                           1464, 1465, 1470, 1482, 1489, 1502, 1519]
+    SN_dic["soc-Epinions1"] = select_SN("soc-Epinions1", 50)
 
-    graphs = ["WS3000"]
+    graphs = ["email-Eu-core"]
 
     for file_name in graphs:
-        G = nx.Graph()
+        G = nx.DiGraph()
         with open(f'../../graph/{file_name}.txt') as f:
             for line in f:
                 n, m, w = line.split()
@@ -1140,9 +1161,9 @@ if __name__ == "__main__":
 
         SN = copy.deepcopy(SN_dic[file_name])
 
-        for k in [200]:
+        for k in [20, 110, 200]:
 
-            repeats = 1
+            repeats = 10
 
             for r in range(repeats):
                 print("\nPCMCC", file_name, k, r + 1)
@@ -1206,6 +1227,7 @@ if __name__ == "__main__":
                 all_FP = list(set(allNodes) - set(fitnessSpace))  # Calculate in advance
 
                 Gs = G.subgraph(allNodes).copy()  # Modify G to make it smaller
+                Gs = Gs.to_directed()
 
                 communityList = communityDivision_1(Gs, C)
 

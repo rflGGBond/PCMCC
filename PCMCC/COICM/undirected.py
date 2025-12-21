@@ -10,8 +10,7 @@ import networkx as nx
 import multiprocessing
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
-
-from PCMCC.COICM.select_SN import select_SN
+from select_SN import select_SN
 
 # log recorder
 class Logger(object):
@@ -20,7 +19,7 @@ class Logger(object):
         output_dir = "../../results/undirected" 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-        log_name = "COICM_facebook_r1_log.txt"
+        log_name = "COICM_BA3000_log_20251127.txt"
         filename = os.path.join(output_dir, log_name)
 
         self.terminal = stream
@@ -1199,7 +1198,7 @@ if __name__ == "__main__":
     
     SN_dic["WS3000"] = select_SN("WS3000", SN_size)
 
-    graphs = ["facebook"]
+    graphs = ["BA3000"]
 
     for file_name in graphs:
         G = nx.Graph()
