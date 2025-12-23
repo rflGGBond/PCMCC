@@ -1,18 +1,29 @@
 #!/bin/bash
 
-# Set the project root directory
-PROJECT_ROOT=$(pwd)
+# Configuration Parameters
+GRAPH_NAME="facebook"
+TOTAL_BUDGET=50
+NUM_COMMUNITIES=4
+MAX_GEN=20
+T_COMM=5
 
-# Add the project root to PYTHONPATH so Python can find the mapcmcc package
-export PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
-echo "Starting MAPCMCC..."
-echo "Project Root: $PROJECT_ROOT"
+echo "Running MAPCMCC with:"
+echo "GRAPH_NAME=$GRAPH_NAME"
+echo "TOTAL_BUDGET=$TOTAL_BUDGET"
+echo "NUM_COMMUNITIES=$NUM_COMMUNITIES"
+echo "MAX_GEN=$MAX_GEN"
+echo "T_COMM=$T_COMM"
+echo "-----------------------------------"
 
-# Check if required packages are installed (optional, basic check)
-python -c "import networkx" 2>/dev/null || { echo "Error: networkx is not installed."; exit 1; }
-python -c "import igraph" 2>/dev/null || { echo "Error: igraph is not installed."; exit 1; }
-python -c "import leidenalg" 2>/dev/null || { echo "Error: leidenalg is not installed."; exit 1; }
-
-# Run the main script
-python mapcmcc/main.py
+# Run the python script
+# Ensure you are in the correct environment or have requirements installed
+python3 mapcmcc/run.py \
+    --graph_name "$GRAPH_NAME" \
+    --total_budget "$TOTAL_BUDGET" \
+    --num_communities "$NUM_COMMUNITIES" \
+    --max_gen "$MAX_GEN" \
+    --t_comm "$T_COMM"

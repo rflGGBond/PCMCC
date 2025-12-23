@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import argparse
 from typing import List, Dict
 
 # Add the parent directory to sys.path to allow imports if running as script
@@ -10,15 +11,27 @@ from mapcmcc.environment.env import PCMCCEnvironment
 from mapcmcc.agents.community_agent import CommunityAgent
 from mapcmcc.agents.meta_agent import MetaAgent
 from mapcmcc.utils.types import CommunityObservation, MetaObservation
+from utils.select_SN import select_SN
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Run MAPCMCC")
+    parser.add_argument("--graph_name", type=str, default="facebook", help="Name of the graph file (without extension)")
+    parser.add_argument("--total_budget", type=int, default=50, help="Total budget")
+    parser.add_argument("--num_communities", type=int, default=4, help="Number of communities")
+    parser.add_argument("--max_gen", type=int, default=20, help="Maximum number of generations")
+    parser.add_argument("--t_comm", type=int, default=5, help="Communication interval")
+    
+    args = parser.parse_args()
+
     # Configuration
-    GRAPH_PATH = "../../graph/BA3000.txt"
-    SN_NODES = [0, 1, 2] # Placeholder, should load from select_SN
-    TOTAL_BUDGET = 50
-    NUM_COMMUNITIES = 4
-    MAX_GEN = 20
-    T_COMM = 5 # Communication interval
+    GRAPH_NAME = args.graph_name
+    GRAPH_PATH = f"../../graph/{GRAPH_NAME}.txt"
+    SN_NODES = select_SN(GRAPH_NAME, 50) # Placeholder, should load from select_SN
+    TOTAL_BUDGET = args.total_budget
+    NUM_COMMUNITIES = args.num_communities
+    MAX_GEN = args.max_gen
+    T_COMM = args.t_comm # Communication interval
     
     # Initialize Environment
     print("Initializing MAPCMCC Environment...")
@@ -99,7 +112,7 @@ def main():
         
     end_time = time.time()
     print(f"\nEvolution Finished. Total Time: {end_time - start_time:.2f}s")
-    # print(f"Best Global DPADV: {env.global_best_dpadv}")
+    print(f"Best Global DPADV: {env.global_best_dpadv}")
 
 if __name__ == "__main__":
     main()
