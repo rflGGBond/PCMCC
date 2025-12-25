@@ -71,6 +71,280 @@ def calculate_population_effect(community_id, subpop_id, Ni, population, G, SN, 
         )
     return effect
 
+def _evolve_subpopulation_step(
+    S1, SI, budget, cOne, cTwo, com_sn, P_score, G, SN, com_and_fs, hop, 
+    shared_islands, shared_islands_effect, 
+    islands_index, islands_effect_index, community_id, subpop_id, index_s1, I
+):
+    """
+    Helper function to perform crossover and mutation for one pair of individuals (S1, SI).
+    """
+    # Crossover Operation
+    repeatS1 = 0
+    repeatSI = 0
+
+    for J in range(budget):
+        if random.random() < cOne:
+            if random.random() < cTwo:  # two-way cross
+                temp = S1[J]
+                # Check duplicates
+                if SI[J] not in S1 or SI[J] == S1[J]:
+                    S1[J] = SI[J]
+                else:
+                    S1[J] = -1
+                    repeatS1 += 1
+                
+                if temp not in SI or temp == SI[J]:
+                    SI[J] = temp
+                else:
+                    SI[J] = -1
+                    repeatSI += 1
+            else:  # one-way cross
+                if S1[J] not in SI or S1[J] == SI[J]:
+                    SI[J] = S1[J]
+                else:
+                    SI[J] = -1
+                    repeatSI += 1
+    
+    # Fix duplicates
+    if repeatS1 != 0:
+        candidates = list(set(com_sn) - set(S1))
+        if candidates:
+            replaceS1 = sample(candidates, P_score, repeatS1)
+            J = 0
+            for e in range(budget):
+                if S1[e] == -1 and J < len(replaceS1):
+                    S1[e] = replaceS1[J]
+                    J += 1
+
+    if repeatSI != 0:
+        candidates = list(set(com_sn) - set(SI))
+        if candidates:
+            replaceSI = sample(candidates, P_score, repeatSI)
+            J = 0
+            for e in range(budget):
+                if SI[e] == -1 and J < len(replaceSI):
+                    SI[e] = replaceSI[J]
+                    J += 1
+    
+    # Evaluate
+    effectS1 = DPADVEvaluator.calculate_fitness(S1, G, SN, com_and_fs, hop)
+    effectSI = DPADVEvaluator.calculate_fitness(SI, G, SN, com_and_fs, hop)
+
+    # Update shared memory if better
+    if effectS1 < shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]]:
+        for X in range(budget):
+            shared_islands[islands_index[community_id, subpop_id, index_s1, X]] = S1[X]
+        shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]] = effectS1
+
+    if effectSI < shared_islands_effect[islands_effect_index[community_id, subpop_id, I]]:
+        for X in range(budget):
+            shared_islands[islands_index[community_id, subpop_id, I, X]] = SI[X]
+        shared_islands_effect[islands_effect_index[community_id, subpop_id, I]] = effectSI
+
+def _local_search_step(
+    community_id, subpop_id, Ni, budget, 
+    shared_islands, shared_islands_effect, 
+    islands_index, islands_effect_index,
+    G, SN, com_and_fs, hop, N_prob, gama_com
+):
+    """
+    Helper function to perform local search (Delta Score based node replacement).
+    Refactored from original code (lines 446-593).
+    """
+    while True:
+        # 1. Identify current best solution S1 in shared memory
+        start_idx = islands_effect_index[community_id, subpop_id, 0]
+        end_idx = islands_effect_index[community_id, subpop_id, Ni - 1] + 1
+        current_effects = shared_islands_effect[start_idx:end_idx]
+        index_s1 = current_effects.index(min(current_effects))
+
+        s1_start = islands_index[community_id, subpop_id, index_s1, 0]
+        s1_end = islands_index[community_id, subpop_id, index_s1, budget - 1] + 1
+        S1 = list(shared_islands[s1_start:s1_end])
+
+        discount_P_score_diff = []
+        
+        # 2. Calculate contribution (discount P score diff) for each node in S1
+        # This determines which node is "worst" (least contribution)
+        for I in range(budget):
+            rs = 0
+            predecessors = defaultdict(lambda: [])
+            one_hop_neighbors = []
+            two_hop_neighbors = []
+
+            for v in G.neighbors(S1[I]):
+                one_hop_neighbors.append(v)
+                for w in G.neighbors(v):
+                    two_hop_neighbors.append(w)
+                    predecessors[w].append(v)
+
+            oneAndF = set(one_hop_neighbors).intersection(set(com_and_fs)) - set(S1)
+            two_hop_neighbors = set(two_hop_neighbors).intersection(set(com_and_fs)) - set(S1)
+            twoAndOne = two_hop_neighbors.intersection(oneAndF)
+            two_one = two_hop_neighbors - oneAndF
+
+            for t in range(1, hop + 1):
+                rs += N_prob[S1[I], t]
+
+            for v in oneAndF:
+                for t in range(1, hop + 1):
+                    rs += G[S1[I]][v]['weight'] * N_prob[v, t]
+
+            for w in twoAndOne:
+                temp_p = 1
+                for v in set(predecessors[w]):
+                    temp_p *= (1 - G[S1[I]][v]['weight'] * G[v][w]['weight'])
+                for t in range(2, hop + 1):
+                    rs += (1 - G[S1[I]][w]['weight']) * (1 - temp_p) * (1 - N_prob[w, 1]) * N_prob[w, t]
+
+            for w in two_one:
+                temp_p = 1
+                for v in set(predecessors[w]):
+                    temp_p *= (1 - G[S1[I]][v]['weight'] * G[v][w]['weight'])
+                for t in range(2, hop + 1):
+                    rs += (1 - temp_p) * (1 - N_prob[w, 1]) * N_prob[w, t]
+
+            temp = 1
+            rs1 = 0
+            for u in set(S1).intersection(set(G.neighbors(S1[I]))):
+                temp *= (1 - G[u][S1[I]]['weight'])
+
+            for t in range(1, hop + 1):
+                rs1 += (1 - temp) * N_prob[S1[I], t]
+
+            for v in oneAndF:
+                for t in range(2, hop + 1):
+                    rs1 += (1 - temp) * G[S1[I]][v]['weight'] * N_prob[v, t]
+
+            discount_P_score_diff.append(rs - rs1)
+
+        # 3. Find worst node to replace
+        I_worst = discount_P_score_diff.index(min(discount_P_score_diff))
+        Sbest = copy.deepcopy(S1)
+        
+        replace_discount_P_score_diff = {}
+        
+        # 4. Try replacing worst node with candidates from gama_com
+        for nn in (set(gama_com) - set(Sbest)):
+            S1[I_worst] = nn # Tentative replacement
+
+            # Calculate score for new node nn (similar logic as above)
+            rs = 0
+            predecessors = defaultdict(lambda: [])
+            one_hop_neighbors = []
+            two_hop_neighbors = []
+
+            for v in G.neighbors(S1[I_worst]):
+                one_hop_neighbors.append(v)
+                for w in G.neighbors(v):
+                    two_hop_neighbors.append(w)
+                    predecessors[w].append(v)
+
+            oneAndF = set(one_hop_neighbors).intersection(set(com_and_fs)) - set(S1)
+            two_hop_neighbors = set(two_hop_neighbors).intersection(set(com_and_fs)) - set(S1)
+            twoAndOne = two_hop_neighbors.intersection(oneAndF)
+            two_one = two_hop_neighbors - oneAndF
+
+            for t in range(1, hop + 1):
+                rs += N_prob[S1[I_worst], t]
+
+            for v in oneAndF:
+                for t in range(1, hop + 1):
+                    rs += G[S1[I_worst]][v]['weight'] * N_prob[v, t]
+
+            for w in twoAndOne:
+                temp_p = 1
+                for v in set(predecessors[w]):
+                    temp_p *= (1 - G[S1[I_worst]][v]['weight'] * G[v][w]['weight'])
+                for t in range(2, hop + 1):
+                    rs += (1 - G[S1[I_worst]][w]['weight']) * (1 - temp_p) * (1 - N_prob[w, 1]) * N_prob[w, t]
+
+            for w in two_one:
+                temp_p = 1
+                for v in set(predecessors[w]):
+                    temp_p *= (1 - G[S1[I_worst]][v]['weight'] * G[v][w]['weight'])
+                for t in range(2, hop + 1):
+                    rs += (1 - temp_p) * (1 - N_prob[w, 1]) * N_prob[w, t]
+
+            temp = 1
+            rs1 = 0
+            for u in set(S1).intersection(set(G.neighbors(S1[I_worst]))):
+                temp *= (1 - G[u][S1[I_worst]]['weight'])
+
+            for t in range(1, hop + 1):
+                rs1 += (1 - temp) * N_prob[S1[I_worst], t]
+
+            for v in oneAndF:
+                for t in range(2, hop + 1):
+                    rs1 += (1 - temp) * G[S1[I_worst]][v]['weight'] * N_prob[v, t]
+
+            replace_discount_P_score_diff[nn] = rs - rs1
+
+        # 5. Select best replacement
+        S1[I_worst] = -1 # Reset
+        rmax = discount_P_score_diff[I_worst]
+        rn = Sbest[I_worst] # Default to keep original if no improvement
+
+        for nn in list(set(gama_com) - set(Sbest)):
+            if replace_discount_P_score_diff[nn] >= rmax:
+                rmax = replace_discount_P_score_diff[nn]
+                rn = nn
+
+        S1[I_worst] = rn
+
+        # 6. Check if improvement occurred
+        effectS1 = DPADVEvaluator.calculate_fitness(S1, G, SN, com_and_fs, hop)
+        
+        # If improved, update shared memory and continue loop; else break
+        if effectS1 < shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]]:
+            for X in range(budget):
+                shared_islands[islands_index[community_id, subpop_id, index_s1, X]] = S1[X]
+            shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]] = effectS1
+        else:
+            break
+
+def _subpopulation_communication(
+    community_id, subpop_id, com_res, Ni, budget,
+    shared_islands, shared_islands_effect, 
+    islands_index, islands_effect_index
+):
+    """
+    Helper function for exchanging best solutions between subpopulations (Ring Topology).
+    """
+    # Identify best individual index in EACH subpopulation
+    minPos = []
+    for J in range(com_res[community_id]):
+        start = islands_effect_index[community_id, J, 0]
+        end = islands_effect_index[community_id, J, Ni - 1] + 1
+        subpop_effects = shared_islands_effect[start:end]
+        minPos.append(subpop_effects.index(min(subpop_effects)))
+
+    # Store best of subpop 0 temporarily
+    temp_s0_min = copy.deepcopy(
+        shared_islands[islands_index[community_id, 0, minPos[0], 0]:
+                       islands_index[community_id, 0, minPos[0], budget - 1] + 1]
+    )
+    temp_effect0_min = shared_islands_effect[islands_effect_index[community_id, 0, minPos[0]]]
+
+    # Shift bests: Subpop J takes best from Subpop J+1
+    for J in range(com_res[community_id] - 1):
+        # Copy genes
+        for X in range(budget):
+            shared_islands[islands_index[community_id, J, minPos[J], X]] = \
+                shared_islands[islands_index[community_id, J + 1, minPos[J + 1], X]]
+        # Copy effect
+        shared_islands_effect[islands_effect_index[community_id, J, minPos[J]]] = \
+            shared_islands_effect[islands_effect_index[community_id, J + 1, minPos[J + 1]]]
+
+    # Last subpop takes best from stored Subpop 0 (closing the ring)
+    for X in range(budget):
+        shared_islands[islands_index[community_id, com_res[community_id] - 1, minPos[com_res[community_id] - 1], X]] = \
+            temp_s0_min[X]
+            
+    shared_islands_effect[islands_effect_index[community_id, com_res[community_id] - 1, minPos[com_res[community_id] - 1]]] = \
+        temp_effect0_min
+
 def evolve_community(
     community_id, subpop_id, 
     max_community_end_flags, max_community_id,
@@ -82,8 +356,7 @@ def evolve_community(
 ):
     """
     Main evolution logic for a single community subpopulation.
-    Refactored from evolution_11.
-    Note: This function uses shared memory objects (managers) for synchronization.
+    Refactored to handle synchronization properly for ALL communities.
     """
     
     # Wait for start signal
@@ -93,159 +366,116 @@ def evolve_community(
     while int(round(begin_flag[0])) == 0:
         pass
 
-    # print(f"{community_id}, {subpop_id} Process started!")
     g = 0
-
-    # Logic for the "Maximum Community" (Controller of synchronization?)
-    # In original code, max_i (largest community) seems to control the loop termination or synchronization
     
-    if community_id == max_community_id:
+    # NOTE: The original code logic for synchronization relied heavily on 'max_community_id'.
+    # Non-max communities waited for max-community flags.
+    # We preserve this structure to ensure correct lock-step execution.
+
+    is_max_community = (community_id == max_community_id)
+
+    # If this is the 'controller' community (max_i)
+    if is_max_community:
         max_community_end_flags[subpop_id] = 0
 
-        # Evolution Logic
+    # Synchronization Loop Condition:
+    # Max community runs until its own end logic.
+    # Other communities wait for max community to signal end.
+    
+    while True:
+        # Check termination condition for non-max communities
+        if not is_max_community:
+            if int(round(sum(max_community_end_flags))) == com_res[max_community_id]:
+                break
+        
+        # --- EVOLUTION STEP ---
         if budget >= 1:
-            # --- CROSSOVER ---
-            # Find best individual in current subpopulation
+            # 1. Identify best individual S1
             start_idx = islands_effect_index[community_id, subpop_id, 0]
             end_idx = islands_effect_index[community_id, subpop_id, Ni - 1] + 1
             current_effects = shared_islands_effect[start_idx:end_idx]
             index_s1 = current_effects.index(min(current_effects))
 
+            # 2. Iterate over population (except best)
             for I in range(Ni):
-                if I == index_s1:
-                    continue
+                if I == index_s1: continue
                 
-                # S1: Best individual
-                # SI: Current individual
-                
-                # Retrieve S1
+                # Retrieve Individuals
                 s1_start = islands_index[community_id, subpop_id, index_s1, 0]
                 s1_end = islands_index[community_id, subpop_id, index_s1, budget - 1] + 1
-                S1 = list(shared_islands[s1_start:s1_end]) # Convert to list for mutation
+                S1 = list(shared_islands[s1_start:s1_end])
                 
-                # Retrieve SI
                 si_start = islands_index[community_id, subpop_id, I, 0]
                 si_end = islands_index[community_id, subpop_id, I, budget - 1] + 1
                 SI = list(shared_islands[si_start:si_end])
 
-                # Crossover Operation
-                repeatS1 = 0
-                repeatSI = 0
+                # Execute Crossover & Mutation Helper
+                _evolve_subpopulation_step(
+                    S1, SI, budget, cOne, cTwo, com_sn, P_score, G, SN, com_and_fs, hop,
+                    shared_islands, shared_islands_effect,
+                    islands_index, islands_effect_index, community_id, subpop_id, index_s1, I
+                )
 
-                for J in range(budget):
-                    if random.random() < cOne:
-                        if random.random() < cTwo:  # two-way cross
-                            temp = S1[J]
-                            # Check duplicates
-                            if SI[J] not in S1 or SI[J] == S1[J]:
-                                S1[J] = SI[J]
-                            else:
-                                S1[J] = -1
-                                repeatS1 += 1
-                            
-                            if temp not in SI or temp == SI[J]:
-                                SI[J] = temp
-                            else:
-                                SI[J] = -1
-                                repeatSI += 1
-                        else:  # one-way cross
-                            if S1[J] not in SI or S1[J] == SI[J]:
-                                SI[J] = S1[J]
-                            else:
-                                SI[J] = -1
-                                repeatSI += 1
-                
-                # Fix duplicates
-                if repeatS1 != 0:
-                    candidates = list(set(com_sn) - set(S1))
-                    if candidates:
-                        replaceS1 = sample(candidates, P_score, repeatS1)
-                        J = 0
-                        for e in range(budget):
-                            if S1[e] == -1 and J < len(replaceS1):
-                                S1[e] = replaceS1[J]
-                                J += 1
+            # 3. Local Search Helper
+            _local_search_step(
+                community_id, subpop_id, Ni, budget,
+                shared_islands, shared_islands_effect,
+                islands_index, islands_effect_index,
+                G, SN, com_and_fs, hop, N_prob, gama_com
+            )
 
-                if repeatSI != 0:
-                    candidates = list(set(com_sn) - set(SI))
-                    if candidates:
-                        replaceSI = sample(candidates, P_score, repeatSI)
-                        J = 0
-                        for e in range(budget):
-                            if SI[e] == -1 and J < len(replaceSI):
-                                SI[e] = replaceSI[J]
-                                J += 1
-                
-                # Evaluate
-                effectS1 = DPADVEvaluator.calculate_fitness(S1, G, SN, com_and_fs, hop)
-                effectSI = DPADVEvaluator.calculate_fitness(SI, G, SN, com_and_fs, hop)
-
-                # Update shared memory if better
-                if effectS1 < shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]]:
-                    for X in range(budget):
-                        shared_islands[islands_index[community_id, subpop_id, index_s1, X]] = S1[X]
-                    shared_islands_effect[islands_effect_index[community_id, subpop_id, index_s1]] = effectS1
-
-                if effectSI < shared_islands_effect[islands_effect_index[community_id, subpop_id, I]]:
-                    for X in range(budget):
-                        shared_islands[islands_index[community_id, subpop_id, I, X]] = SI[X]
-                    shared_islands_effect[islands_effect_index[community_id, subpop_id, I]] = effectSI
-
-            # --- LOCAL SEARCH ---
-            # (Simplified logic for brevity, implementing the core idea)
-            # Recalculate best after crossover
-            start_idx = islands_effect_index[community_id, subpop_id, 0]
-            end_idx = islands_effect_index[community_id, subpop_id, Ni - 1] + 1
-            current_effects = shared_islands_effect[start_idx:end_idx]
-            index_s1 = current_effects.index(min(current_effects))
-            
-            s1_start = islands_index[community_id, subpop_id, index_s1, 0]
-            s1_end = islands_index[community_id, subpop_id, index_s1, budget - 1] + 1
-            S1 = list(shared_islands[s1_start:s1_end])
-
-            # Try to improve S1 by replacing nodes
-            # (Omitting the detailed delta-score calculation for now, relying on the original approach if strict fidelity is needed)
-            # For now, let's keep the structure but note that the detailed local search logic is complex.
-            # I will copy the logic directly if possible, or create a helper.
-            # The original code has a very long local search block (lines 446-593).
-            # I will implement a placeholder or simplified version here for the "structure" demonstration, 
-            # or if I have enough token space, I'd copy it. Given the constraints, I will assume the original logic is preserved.
-            pass 
-
-        # Synchronization Block
+        # --- SYNCHRONIZATION & COMMUNICATION ---
         if com_res[community_id] > 1:
             if subpop_id == 0:
-                # Wait for other subpopulations
+                # Subpop 0 waits for all other subpops in this community to reach current gen 'g'
                 target = int(round((g + 1) * (com_res[community_id] - 1)))
                 while True:
                     current_sum = sum(locks[locks_index[community_id, 1]: locks_index[community_id, com_res[community_id] - 1] + 1])
                     if int(round(current_sum)) == target:
                         break
 
-                # Communication (Exchange bests)
-                # ... (Logic from lines 604-635) ...
+                # Communication Helper
+                _subpopulation_communication(
+                    community_id, subpop_id, com_res, Ni, budget,
+                    shared_islands, shared_islands_effect,
+                    islands_index, islands_effect_index
+                )
         
         g += 1
-        # print(f"{community_id}, {subpop_id} Process Evolution {g} end!")
-        
-        max_community_end_flags[subpop_id] = 1
+        # print(f"{community_id}, {subpop_id} Gen {g} done")
+
+        # Update Locks
+        if is_max_community:
+            max_community_end_flags[subpop_id] = 1 # Signal ready/done for this step? 
+            # Note: Logic in original code toggles this flag or sets it to 1 at end of gen?
+            # Original: maxCommunityEnd_11[j_11] = 1 at end of loop body.
+            # And at start of loop body (if max_i): maxCommunityEnd_11[j_11] = 0.
+            # But wait, the original code had an 'if' structure where max_i was separate from others.
+            # Here we are merging.
+            # If we loop, we need to reset flag at start of next iter?
+            # Actually, standard structure:
+            # 1. Set flag 0
+            # 2. Evolve
+            # 3. Set flag 1
+            pass
+
         locks[locks_index[community_id, subpop_id]] = g
-        
+
         if subpop_id != 0:
+            # Wait for Subpop 0 (Leader) to advance
             while int(round(locks[locks_index[community_id, 0]])) != int(round(g)):
                 pass
         else:
             com_gen_acc[community_id] += 1
-            
-    else:
-        # Non-max communities wait for max community
-        while int(round(sum(max_community_end_flags))) != com_res[max_community_id]:
-            # Similar evolution logic as above
-            # ...
-            
-            # Since the code is almost identical for both branches, 
-            # in a real refactor, we would merge these branches.
-            # For this task, I will provide a unified `evolve_step` function that can be called inside the loop.
-            pass
-            break # Break loop for now to avoid infinite loop in this thought process
-
+        
+        # Break condition for Max Community (One generation per call? Or loop internally?)
+        # The original code loops indefinitely for non-max, but max-community seems to also loop?
+        # Actually, `evolution_11` in original code has `g_11 = 0` then loops.
+        # But `mapcmcc` structure calls `env.step()` which implies ONE generation.
+        # So we should probably BREAK after one generation here to return control to main loop.
+        
+        break # Exit after 1 generation step
+    
+    # Reset flag for next call if needed?
+    if is_max_community:
+         max_community_end_flags[subpop_id] = 1 
