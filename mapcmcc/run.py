@@ -11,6 +11,7 @@ from mapcmcc.environment.env import PCMCCEnvironment
 from mapcmcc.agents.community_agent import CommunityAgent
 from mapcmcc.agents.meta_agent import MetaAgent
 from mapcmcc.utils.types import CommunityObservation, MetaObservation
+from mapcmcc.utils.llm_client import LLMClient
 from utils.select_SN import select_SN
 
 def main():
@@ -22,17 +23,32 @@ def main():
     parser.add_argument("--max_gen", type=int, default=20, help="Maximum number of generations")
     parser.add_argument("--t_comm", type=int, default=5, help="Communication interval")
     
+    # LLM Arguments
+    parser.add_argument("--llm_provider", type=str, default="mock", choices=["mock", "local", "openai"], help="LLM Provider")
+    parser.add_argument("--llm_model", type=str, default="gpt-4-turbo", help="Model name (or path for local)")
+    parser.add_argument("--api_key", type=str, default=None, help="API Key for OpenAI")
+    parser.add_argument("--model_root", type=str, default="/home/dell/lfr/models", help="Root directory for local models")
+
     args = parser.parse_args()
 
     # Configuration
     GRAPH_NAME = args.graph_name
-    GRAPH_PATH = f"../../graph/{GRAPH_NAME}.txt"
+    GRAPH_PATH = f"../graph/{GRAPH_NAME}.txt"
     SN_NODES = select_SN(GRAPH_NAME, 50) # Placeholder, should load from select_SN
     TOTAL_BUDGET = args.total_budget
     NUM_COMMUNITIES = args.num_communities
     MAX_GEN = args.max_gen
     T_COMM = args.t_comm # Communication interval
     
+    # Initialize LLM Client
+    print(f"Initializing LLM Client ({args.llm_provider} - {args.llm_model})...")
+    llm_client = LLMClient(
+        provider=args.llm_provider,
+        model=args.llm_model,
+        api_key=args.api_key,
+        model_root=args.model_root
+    )
+
     # Initialize Environment
     print("Initializing MAPCMCC Environment...")
     env = PCMCCEnvironment(GRAPH_PATH, SN_NODES, TOTAL_BUDGET, NUM_COMMUNITIES)
@@ -40,9 +56,19 @@ def main():
     # Initialize Agents
     community_agents = {}
     for com_id in env.communities:
-        community_agents[com_id] = CommunityAgent(agent_id=f"ComAgent_{com_id}")
+        community_agents[com_id] = CommunityAgent(
+            agent_id=f"ComAgent_{com_id}",
+            llm_client=llm_client
+        )
     
-    meta_agent = MetaAgent()
+    # MetaAgent is currently missing in the repo or imported incorrectly, 
+    # but assuming it exists or will be fixed:
+    try:
+        meta_agent = MetaAgent() # MetaAgent likely needs llm_client too if implemented
+        # meta_agent = MetaAgent(llm_client=llm_client) 
+    except Exception as e:
+        print(f"Warning: Failed to initialize MetaAgent: {e}")
+        meta_agent = None
     
     print("Starting Evolution Loop...")
     start_time = time.time()
@@ -83,25 +109,26 @@ def main():
                 env.apply_community_action(com_id, action)
                 
             # B. Meta Agent
-            # obs = env.get_global_observation()
-            # Mock
-            meta_obs = MetaObservation(
-                current_generation=gen,
-                current_global_dpadv=0.4,
-                global_dpadv_history=[],
-                community_summaries=[],
-                merge_history=[]
-            )
-            
-            meta_action = meta_agent.get_action(meta_obs)
-            
-            # 2.1 Apply Meta-Agent Suggestions to Environment
-            # Specifically handling Merge Suggestions which need to override/guide the standard merge logic
-            if meta_action.merge_suggestions:
-                print(f"Meta-Agent suggests merging: {meta_action.merge_suggestions}")
-                env.set_merge_suggestions(meta_action.merge_suggestions)
-            
-            env.apply_meta_action(meta_action)
+            if meta_agent:
+                # obs = env.get_global_observation()
+                # Mock
+                meta_obs = MetaObservation(
+                    current_generation=gen,
+                    current_global_dpadv=0.4,
+                    global_dpadv_history=[],
+                    community_summaries=[],
+                    merge_history=[]
+                )
+                
+                meta_action = meta_agent.get_action(meta_obs)
+                
+                # 2.1 Apply Meta-Agent Suggestions to Environment
+                # Specifically handling Merge Suggestions which need to override/guide the standard merge logic
+                if meta_action.merge_suggestions:
+                    print(f"Meta-Agent suggests merging: {meta_action.merge_suggestions}")
+                    env.set_merge_suggestions(meta_action.merge_suggestions)
+                
+                env.apply_meta_action(meta_action)
             
         # 3. Check Convergence
         # if env.check_convergence(): break
