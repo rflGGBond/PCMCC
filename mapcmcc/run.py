@@ -99,11 +99,7 @@ def main():
             # Specifically handling Merge Suggestions which need to override/guide the standard merge logic
             if meta_action.merge_suggestions:
                 print(f"Meta-Agent suggests merging: {meta_action.merge_suggestions}")
-                # In a real implementation, we would pass these suggestions to env.step() 
-                # or a specific env.merge() method.
-                # For this refactor, we simulate the 'Force Merge' signal.
-                # env.force_merge(meta_action.merge_suggestions)
-                pass
+                env.set_merge_suggestions(meta_action.merge_suggestions)
             
             env.apply_meta_action(meta_action)
             

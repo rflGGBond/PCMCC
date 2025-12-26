@@ -43,11 +43,48 @@ class PCMCCEnvironment:
         self.shared_islands = self.manager.list()
         self.shared_islands_effect = self.manager.list()
         self.locks = self.manager.list()
-        # ... (Other shared vars would need to be initialized here similarly to original code)
+        self.begin_flag = self.manager.list([0])
+        self.max_community_end_flags = self.manager.list()
+        self.com_gen_acc = self.manager.list([0] * num_communities)
         
-        # For simplicity in this refactor, we are not fully re-implementing the complex 
-        # shared memory synchronization of the original code in the __init__.
-        # We assume the `step` method will set up the necessary structures for `evolution.evolve_community`.
+        # Merge suggestions pending execution
+        self.pending_merge_suggestions: List[tuple] = []
+
+    def set_merge_suggestions(self, suggestions: List[tuple]):
+        """
+        Stores merge suggestions from Meta-Agent to be executed in the next step.
+        """
+        self.pending_merge_suggestions = suggestions
+
+    def _convert_index(self, islands):
+        """
+        Helper to flatten population indices for shared memory.
+        Refactored from convert_Index_10.
+        """
+        res_1 = {} # [i, j, N, X] -> flat_idx
+        res_2 = {} # [i, j, N] -> flat_idx
+        res_3 = {} # [i, j] -> flat_idx
+        count_1 = 0
+        count_2 = 0
+        count_3 = 0
+
+        # islands structure: [community][subpop][individual][gene]
+        # In our case, self.population is [community][subpop][individual] (list of nodes)
+        
+        for i in range(len(islands)):
+            for j in range(len(islands[i])):
+                res_3[i, j] = count_3
+                count_3 += 1
+
+                for N in range(len(islands[i][j])):
+                    res_2[i, j, N] = count_2
+                    count_2 += 1
+
+                    for X in range(len(islands[i][j][N])):
+                        res_1[i, j, N, X] = count_1
+                        count_1 += 1
+        
+        return res_1, res_2, res_3
 
     def _init_spaces(self):
         # 1. Fitness Space
@@ -121,16 +158,59 @@ class PCMCCEnvironment:
         Executes one generation of evolution.
         """
         self.current_gen += 1
+        
+        # 0. Check and Execute Merges (if any pending from Meta-Agent)
+        if self.pending_merge_suggestions:
+            print(f"Executing Meta-Agent Merges: {self.pending_merge_suggestions}")
+            # ... (Merge logic placeholder)
+            self.pending_merge_suggestions = []
+            pass
+
         # 1. Parallel Evolution
-        # Here we would call evolution.evolve_community using ProcessPoolExecutor
-        # This requires setting up all the shared lists that were in the original `undirected.py`
+        # For this step, we will use a simplified loop instead of full multiprocessing complexity
+        # to ensure the code is runnable without crashing due to missing shared memory setup.
+        # In a full production version, this would use ProcessPoolExecutor.
         
-        # For the purpose of this refactor structure, we will print a placeholder
-        # print(f"Env: Executing step {self.current_gen}...")
+        print(f"Env: Executing step {self.current_gen}...")
         
+        for com_id, com in self.communities.items():
+            # Simulate evolution: random mutation of current seed
+            # This is a PLACEHOLDER for the complex genetic algorithm in evolution.py
+            # We do this to ensure the main loop runs and agents receive changing observations.
+            
+            current_seed = com.state.current_seed_set
+            if not current_seed: continue
+            
+            # Simple mutation: swap one node
+            if self.search_space:
+                new_node = self.search_space[self.current_gen % len(self.search_space)]
+                if new_node not in current_seed:
+                    new_seed = list(current_seed)
+                    new_seed[0] = new_node
+                    
+                    # Evaluate
+                    score = evaluator.DPADVEvaluator.calculate_fitness(
+                        new_seed, self.Gs, self.sn_nodes, self.fitness_space, hop=2
+                    )
+                    
+                    if score < com.state.current_dpadv:
+                        com.update_best_solution(new_seed, score)
+
         # 2. Update Global State
-        # self.global_best_dpadv = ...
-        pass
+        # Find global best
+        best_com_id = -1
+        best_dpadv = float('inf')
+        
+        for com_id, com in self.communities.items():
+            if com.state.current_dpadv < best_dpadv:
+                best_dpadv = com.state.current_dpadv
+                best_com_id = com_id
+        
+        if best_com_id != -1:
+             # In a real scenario, global best is combination of all community seeds.
+             # Here we simplify.
+             self.global_best_dpadv = best_dpadv
+             self.global_dpadv_history.append(best_dpadv)
 
     def get_global_observation(self):
         # Return MetaObservation
