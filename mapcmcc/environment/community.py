@@ -9,7 +9,12 @@ class CommunityState:
     nodes: List[int]
     budget: int
     
-    # Evolution Parameters
+    # Evolution Parameters (Base + Adjustment)
+    base_cr1: float = 0.3
+    base_cr2: float = 0.3
+    base_beta: float = 2.0
+    base_alpha: float = 12.0
+    
     cr1: float = 0.3
     cr2: float = 0.3
     beta: float = 2.0  # Local search intensity / maxT factor
@@ -54,11 +59,30 @@ class Community:
         if len(self.state.dpadv_history) > 20:
             self.state.dpadv_history.pop(0)
 
-    def update_parameters(self, params: Dict[str, Any]):
-        if 'cr1' in params: self.state.cr1 = params['cr1']
-        if 'cr2' in params: self.state.cr2 = params['cr2']
-        if 'beta' in params: self.state.beta = params['beta']
-        if 'alpha' in params: self.state.alpha = params['alpha']
+    def update_parameters(self, params: Dict[str, Any], is_global_baseline: bool = False):
+        """
+        Updates parameters. If is_global_baseline is True, updates the base values.
+        If False (Agent action), updates the active values (overriding base).
+        """
+        if is_global_baseline:
+            if 'cr1' in params: self.state.base_cr1 = params['cr1']
+            if 'cr2' in params: self.state.base_cr2 = params['cr2']
+            if 'beta' in params: self.state.base_beta = params['beta']
+            if 'alpha' in params: self.state.base_alpha = params['alpha']
+            
+            # Reset active parameters to new base (unless we want to preserve local drift, 
+            # but usually global baseline change implies a reset)
+            self.state.cr1 = self.state.base_cr1
+            self.state.cr2 = self.state.base_cr2
+            self.state.beta = self.state.base_beta
+            self.state.alpha = self.state.base_alpha
+            
+        else:
+            # Local adjustment
+            if 'cr1' in params: self.state.cr1 = params['cr1']
+            if 'cr2' in params: self.state.cr2 = params['cr2']
+            if 'beta' in params: self.state.beta = params['beta']
+            if 'alpha' in params: self.state.alpha = params['alpha']
         
     def set_top_k_nodes(self, nodes_with_scores: List[tuple]):
         # nodes_with_scores: [(node_id, score), ...]
